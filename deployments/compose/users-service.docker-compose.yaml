@@ -1,0 +1,64 @@
+version: "3"
+
+services:
+
+  users_service:
+    build:
+      context: ../..
+      dockerfile: ./deployments/docker/users-service.dockerfile
+    environment:
+      LOCAL: ${LOCAL}
+      NAME: ${NAME}
+      ADDRESS: ${ADDRESS}
+      GRPC_PORT: ${GRPC_PORT}
+      START_TIMEOUT: ${START_TIMEOUT}
+      SHUTDOWN_TIMEOUT: ${SHUTDOWN_TIMEOUT}
+      CONSUL_URL: ${CONSUL_URL}
+      POSTGRES_URL: postgres://${USERS_DB_USERNAME}:${USERS_DB_PASSWORD}@users_postgres:5432/${USERS_DB_NAME}
+    networks:
+      - bw_users-net
+      - bw_gateway-net
+    depends_on:
+      - users_postgres
+
+  users_postgres:
+    container_name: users_postgres
+    image: postgres:17.2-alpine
+    environment:
+      POSTGRES_USER: ${USERS_DB_USERNAME}
+      POSTGRES_PASSWORD: ${USERS_DB_PASSWORD}
+      POSTGRES_DB: ${USERS_DB_NAME}
+    restart: on-failure
+    ports:
+      - ${USERS_DB_PORT}:5432
+    volumes:
+      - bw_users_postgres_data:/var/lib/postgresql/data
+    networks:
+      - bw_users-net
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready --dbname ${USERS_DB_NAME} --username ${USERS_DB_USERNAME}" ]
+      interval: 1s
+      timeout: 10s
+
+  users_migrator:
+    build:
+      context: ../..
+      dockerfile: ./deployments/docker/tern-migrator.dockerfile
+    command:
+      - migrate
+      - --conn-string
+      - postgres://${USERS_DB_USERNAME}:${USERS_DB_PASSWORD}@users_postgres:5432/${USERS_DB_NAME}
+      - --migrations
+      - /migrations
+    networks:
+      - bw_users-net
+    depends_on:
+      users_postgres:
+        condition: service_healthy
+
+networks:
+  bw_gateway-net:
+  bw_users-net:
+
+volumes:
+  bw_users_postgres_data:
